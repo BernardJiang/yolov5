@@ -19,6 +19,7 @@ try:
 except ImportError:
     thop = None
 
+import kqat
 
 class Detect(nn.Module):
     stride = None  # strides computed during build
@@ -169,6 +170,9 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         self.info()
         return self
+
+    def fuse_modules(self):
+        kqat.fuse_children(self.model, (Conv, Bottleneck, SPP, Focus, C3))
 
     def nms(self, mode=True):  # add or remove NMS module
         present = type(self.model[-1]) is NMS  # last layer is NMS

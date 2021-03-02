@@ -2,6 +2,7 @@
 
 import math
 import numpy as np
+from numpy.core.arrayprint import BoolFormat
 import requests
 import torch
 import torch.nn as nn
@@ -11,6 +12,7 @@ from utils.datasets import letterbox
 from utils.general import non_max_suppression, make_divisible, scale_coords, xyxy2xywh
 from utils.plots import color_list
 
+import kqat
 
 def autopad(k, p=None):  # kernel, padding
     # Pad to 'same'
@@ -38,6 +40,8 @@ class Conv(nn.Module):
     def fuseforward(self, x):
         return self.act(self.conv(x))
 
+    def fuse_modules(self):
+        kqat.fuse_modules(self, ['conv', 'bn', 'act'], inplace=True)
 
 class Bottleneck(nn.Module):
     # Standard bottleneck
@@ -51,6 +55,8 @@ class Bottleneck(nn.Module):
     def forward(self, x):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
+    def fuse_modules(self):
+        kqat.fuse_children(self, Conv)
 
 class BottleneckCSP(nn.Module):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
@@ -85,6 +91,9 @@ class C3(nn.Module):
     def forward(self, x):
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))
 
+    def fuse_modules(self):
+        kqat.fuse_children(self, (Conv, Bottleneck))
+        kqat.fuse_children(self.m, (Conv, Bottleneck))
 
 class SPP(nn.Module):
     # Spatial pyramid pooling layer used in YOLOv3-SPP
@@ -99,6 +108,8 @@ class SPP(nn.Module):
         x = self.cv1(x)
         return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
 
+    def fuse_modules(self):
+        kqat.fuse_children(self, Conv)
 
 class Focus(nn.Module):
     # Focus wh information into c-space
@@ -111,6 +122,8 @@ class Focus(nn.Module):
         return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
         # return self.conv(self.contract(x))
 
+    def fuse_modules(self):
+        kqat.fuse_children(self, Conv)
 
 class Contract(nn.Module):
     # Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40)

@@ -21,6 +21,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+import kqat
+
 import test  # import test.py to get mAP after each epoch
 from models.experimental import attempt_load
 from models.yolo import Model
@@ -91,6 +93,13 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         logger.info('Transferred %g/%g items from %s' % (len(state_dict), len(model.state_dict()), weights))  # report
     else:
         model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
+
+    qat = True
+    if qat:
+        kqat.fuse_model(model, inplace=True)
+        qcfg, qcfg8 = kqat.get_default_qconfig(8, True)
+        model.qconfig = qcfg8
+        kqat.quant_model(model, mapping=kqat.kneron_qat_default, inplace=True)
 
     # Freeze
     freeze = []  # parameter names to freeze (full or partial)
