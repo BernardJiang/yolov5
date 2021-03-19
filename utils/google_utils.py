@@ -16,7 +16,7 @@ def gsutil_getsize(url=''):
     return eval(s.split(' ')[0]) if len(s) else 0  # bytes
 
 
-def attempt_download(weights):
+def attempt_download(weights, tag=None):
     # Attempt to download pretrained weights if not found locally
     weights = str(weights).strip().replace("'", '')
     file = Path(weights).name.lower()
@@ -28,7 +28,7 @@ def attempt_download(weights):
 
     if file in assets and not os.path.isfile(weights):
         try:  # GitHub
-            tag = response['tag_name']  # i.e. 'v1.0'
+            tag = response['tag_name'] if tag is None else tag # i.e. 'v1.0'
             url = f'https://github.com/ultralytics/yolov5/releases/download/{tag}/{file}'
             print('Downloading %s to %s...' % (url, weights))
             torch.hub.download_url_to_file(url, weights)
