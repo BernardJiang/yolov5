@@ -18,6 +18,15 @@ from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized
 
+import kqat
+
+def output_mse(result_fx, result_fl):
+    from torch.functional import F
+    _, train_fx = result_fx
+    _, train_fl = result_fl
+
+    loss = [abs(F.mse_loss(x, y)) for x, y in zip(train_fx, train_fl)]
+    return sum(loss)
 
 def test(data,
          weights=None,
@@ -36,8 +45,12 @@ def test(data,
          save_hybrid=False,  # for hybrid auto-labelling
          save_conf=False,  # save auto-label confidences
          plots=True,
-         log_imgs=0,
-         enable_half=True):  # number of logged images
+         log_imgs=0, # number of logged images
+         enable_half=True,
+         qat=False,
+         sens=False,
+         bitwidth=8
+         ): 
 
     # Initialize/load model and set device
     training = model is not None
@@ -53,17 +66,33 @@ def test(data,
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
-        model = attempt_load(weights, map_location=device)  # load FP32 model
+        model = attempt_load(weights, map_location=device, qat=qat)  # load FP32 model
         imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
 
         # Multi-GPU disabled, incompatible with .half() https://github.com/ultralytics/yolov5/issues/99
         # if device.type != 'cpu' and torch.cuda.device_count() > 1:
         #     model = nn.DataParallel(model)
 
+        # quantize model and senstivity
+        if qat:
+            kqat.fuse_model(model, inplace=True)
+            if sens:
+                qcfg, qcfg8 = kqat.get_default_qconfig(bitwidth, True)
+                model.qconfig = qcfg
+            else:
+                raise NotImplementedError("weight needs reload")
+            kqat.quant_model(model, mapping=kqat.kneron_qat_default, inplace=True)
+            enable_half = False
+            print('model quantized')
+
     # Half
     half = enable_half and device.type != 'cpu'  # half precision only supported on CUDA
     if half:
         model.half()
+
+    if qat and sens:
+        fb = kqat.SensitivitySchedule(loss=output_mse)
+        fb.trigger(model)
 
     # Configure
     model.eval()
@@ -109,6 +138,9 @@ def test(data,
             t = time_synchronized()
             inf_out, train_out = model(img, augment=augment)  # inference and training outputs
             t0 += time_synchronized() - t
+
+            if qat and sens:
+                fb.trigger_batch(model, img, augment=augment)
 
             # Compute loss
             if training:
@@ -205,6 +237,9 @@ def test(data,
             # Append statistics (correct, conf, pcls, tcls)
             stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
 
+        if qat and sens:
+            fb.dump('sens_{}.json'.format(bitwidth))
+
         # Plot images
         if plots and batch_i < 3:
             f = save_dir / f'test_batch{batch_i}_labels.jpg'  # labels
@@ -299,6 +334,9 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='runs/test', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
+    parser.add_argument('--qat', action='store_true')
+    parser.add_argument('--sens', action='store_true')
+    parser.add_argument('--bitwidth', type=int, default=8)
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file
@@ -318,6 +356,9 @@ if __name__ == '__main__':
              save_txt=opt.save_txt | opt.save_hybrid,
              save_hybrid=opt.save_hybrid,
              save_conf=opt.save_conf,
+             qat=opt.qat,
+             sens=opt.sens,
+             bitwidth=opt.bitwidth
              )
 
     elif opt.task == 'study':  # run over a range of settings and save/plot
