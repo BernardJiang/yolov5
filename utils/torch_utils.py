@@ -264,8 +264,8 @@ class ModelEMA:
         #     self.ema.half()  # FP16 EMA
         self.updates = updates  # number of EMA updates
         self.decay = lambda x: decay * (1 - math.exp(-x / 2000))  # decay exponential ramp (to help early epochs)
-        for p in self.ema.parameters():
-            p.requires_grad_(False)
+        # for p in self.ema.parameters():
+        #     p.requires_grad_(False)
 
     def update(self, model):
         # Update EMA parameters
@@ -275,7 +275,9 @@ class ModelEMA:
 
             msd = model.module.state_dict() if is_parallel(model) else model.state_dict()  # model state_dict
             for k, v in self.ema.state_dict().items():
-                if v.dtype.is_floating_point:
+                if isinstance(v, nn.UninitializedParameter):
+                    v = d                    
+                elif v.dtype.is_floating_point:
                     v *= d
                     v += (1. - d) * msd[k].detach()
 
