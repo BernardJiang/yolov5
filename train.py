@@ -94,12 +94,14 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     else:
         model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
 
-    qat = True
-    if qat:
+    if opt.qat:
         kqat.fuse_model(model, inplace=True)
         qcfg, qcfg8 = kqat.get_default_qconfig(8, True)
         model.qconfig = qcfg8
         kqat.quant_model(model, mapping=kqat.kneron_qat_default, inplace=True)
+        fb = kqat.FreezeSch(opt.freeze_sch, kqat.FreezeKneron(decay=0.1))
+    else:
+        fb = None
 
     # Freeze
     freeze = []  # parameter names to freeze (full or partial)
@@ -116,7 +118,10 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
 
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    for k, v in model.named_modules():
+    named_param = model.named_modules()
+    if opt.qat:
+        p, named_param = kqat.split_parameter(named_param)
+    for k, v in named_param:
         if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
             pg2.append(v.bias)  # biases
         if isinstance(v, nn.BatchNorm2d):
@@ -131,6 +136,8 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
 
     optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
     optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
+    if opt.qat:
+        optimizer.add_param_group({'params': p, 'lr': hyp['lr0'] * 10, 'weight_decay': 0.})  # add pg2 (biases)
     logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))
     del pg0, pg1, pg2
 
@@ -247,6 +254,9 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
 
+        if fb:
+            fb.trigger(model, epoch)
+
         # Update image weights (optional)
         if opt.image_weights:
             # Generate indices
@@ -313,6 +323,13 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
             if ni % accumulate == 0:
                 scaler.step(optimizer)  # optimizer.step
                 scaler.update()
+
+                if fb:
+                    fb.collect_batch(model, optimizer)
+                    # trigger update at some point
+                    if i != 0:
+                        fb.trigger_batch(model, epoch, i)
+
                 optimizer.zero_grad()
                 if ema:
                     ema.update(model)
@@ -475,6 +492,8 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
+    parser.add_argument('--qat', action='store_true')
+    parser.add_argument('--freeze-sch', type=str, default='', help='csv, [edbp][0-9]*')
     opt = parser.parse_args()
 
     # Set DDP variables
