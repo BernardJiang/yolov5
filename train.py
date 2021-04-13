@@ -22,6 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import kqat
+import timm
 
 import test  # import test.py to get mAP after each epoch
 from models.experimental import attempt_load
@@ -81,7 +82,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     pretrained = weights.endswith('.pt')
     if pretrained:
         with torch_distributed_zero_first(rank):
-            attempt_download(weights, tag='v2.0')  # download if not found locally
+            attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
         if hyp.get('anchors'):
             ckpt['model'].yaml['anchors'] = round(hyp['anchors'])  # force autoanchor
@@ -117,34 +118,15 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
     logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
 
-    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    named_param = model.named_modules()
+    res_param = []
+    named_param = model.named_parameters()
     if opt.qat:
-        p, named_param = kqat.split_parameter(named_param)
-    for k, v in named_param:
-        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
-            pg2.append(v.bias)  # biases
-        if isinstance(v, nn.BatchNorm2d):
-            pg0.append(v.weight)  # no decay
-        elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):
-            pg1.append(v.weight)  # apply decay
+        radix, named_param = kqat.split_parameter(named_param, hyp['lr0'] * 50, 0.0)
+        res_param.append(radix)
+    res_param.extend(timm.add_weight_decay(named_param, hyp['weight_decay']))
 
-    if opt.adam:
-        optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  # adjust beta1 to momentum
-    else:
-        optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
-
-    optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
-    optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
-    if opt.qat:
-        optimizer.add_param_group({'params': p, 'lr': hyp['lr0'] * 10, 'weight_decay': 0.})  # add pg2 (biases)
-    logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))
-    del pg0, pg1, pg2
-
-    # Scheduler https://arxiv.org/pdf/1812.01187.pdf
-    # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
-    lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+    optimizer = optim.Adam(res_param, lr=hyp['lr0'])
+    scheduler, num_epochs = timm.create_scheduler(opt, optimizer)
     # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # Logging
@@ -251,8 +233,14 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     logger.info('Image sizes %g train, %g test\n'
                 'Using %g dataloader workers\nLogging results to %s\n'
                 'Starting training for %g epochs...' % (imgsz, imgsz_test, dataloader.num_workers, save_dir, epochs))
-    for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
+
+    if scheduler is not None and start_epoch > 0:
+        scheduler.step(start_epoch)
+
+    for epoch in range(start_epoch, num_epochs):  # epoch ------------------------------------------------------------------
         model.train()
+
+        print(optimizer)
 
         if fb:
             fb.trigger(model, epoch)
@@ -294,7 +282,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                 accumulate = max(1, np.interp(ni, xi, [1, nbs / total_batch_size]).round())
                 for j, x in enumerate(optimizer.param_groups):
                     # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
-                    x['lr'] = np.interp(ni, xi, [hyp['warmup_bias_lr'] if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])
+                    x['lr'] = np.interp(ni, xi, [hyp['warmup_bias_lr'] if j == 2 else 0.0, x['initial_lr'] * scheduler.get_epoch_values(epoch)[1]])
                     if 'momentum' in x:
                         x['momentum'] = np.interp(ni, xi, [hyp['warmup_momentum'], hyp['momentum']])
 
@@ -324,11 +312,11 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                 scaler.step(optimizer)  # optimizer.step
                 scaler.update()
 
-                if fb:
-                    fb.collect_batch(model, optimizer)
-                    # trigger update at some point
-                    if i != 0:
-                        fb.trigger_batch(model, epoch, i)
+                # if fb:
+                #     fb.collect_batch(model, optimizer)
+                #     # trigger update at some point
+                #     if i != 0:
+                #         fb.trigger_batch(model, epoch, i)
 
                 optimizer.zero_grad()
                 if ema:
@@ -357,7 +345,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
 
         # Scheduler
         lr = [x['lr'] for x in optimizer.param_groups]  # for tensorboard
-        scheduler.step()
+        scheduler.step(epoch+1)
 
         # DDP process 0 or single-GPU
         if rank in [-1, 0]:
@@ -482,7 +470,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%%')
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
-    parser.add_argument('--adam', action='store_true', help='use torch.optim.Adam() optimizer')
+    parser.add_argument('--opt', type=str, default='adam', help="optimizer")
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--log-imgs', type=int, default=16, help='number of images for W&B logging, max 100')
@@ -494,6 +482,23 @@ if __name__ == '__main__':
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--qat', action='store_true')
     parser.add_argument('--freeze-sch', type=str, default='', help='csv, [edbp][0-9]*')
+    # Learning rate schedule parameters
+    parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
+                        help='LR scheduler (default: "cosine"')
+    parser.add_argument('--lr-cycle-mul', type=float, default=5.0, metavar='MULT',
+                        help='learning rate cycle len multiplier (default: 5.0)')
+    parser.add_argument('--lr-cycle-limit', type=int, default=2, metavar='N',
+                        help='learning rate cycle limit')
+    parser.add_argument('--warmup-lr', type=float, default=0.0001, metavar='LR',
+                        help='warmup learning rate (default: 0.0001)')
+    parser.add_argument('--min-lr', type=float, default=2e-7, metavar='LR',
+                        help='lower lr bound for cyclic schedulers that hit 0 (2e-7)')
+    parser.add_argument('--warmup-epochs', type=int, default=0, metavar='N',
+                        help='epochs to warmup LR, if scheduler supports')
+    parser.add_argument('--cooldown-epochs', type=int, default=5, metavar='N',
+                        help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
+    parser.add_argument('--decay-rate', '--dr', type=float, default=0.6, metavar='RATE',
+                        help='LR decay rate (default: 0.6)')
     opt = parser.parse_args()
 
     # Set DDP variables
