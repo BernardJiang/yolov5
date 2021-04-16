@@ -82,7 +82,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     pretrained = weights.endswith('.pt')
     if pretrained:
         with torch_distributed_zero_first(rank):
-            attempt_download(weights)  # download if not found locally
+            attempt_download(weights, tag='v4.0')  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
         if hyp.get('anchors'):
             ckpt['model'].yaml['anchors'] = round(hyp['anchors'])  # force autoanchor
@@ -121,11 +121,11 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     res_param = []
     named_param = model.named_parameters()
     if opt.qat:
-        radix, named_param = kqat.split_parameter(named_param, hyp['lr0'] * 50, 0.0)
-        res_param.append(radix)
+        radix, named_param = kqat.split_parameter(named_param)
+        res_param.append({'params': radix, 'lr': hyp['lr0'] * 10, 'weight_decay': 0.})
     res_param.extend(timm.add_weight_decay(named_param, hyp['weight_decay']))
 
-    optimizer = optim.Adam(res_param, lr=hyp['lr0'])
+    optimizer = optim.Adam(res_param, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))
     scheduler, num_epochs = timm.create_scheduler(opt, optimizer)
     # plot_lr_scheduler(optimizer, scheduler, epochs)
 
