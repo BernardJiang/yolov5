@@ -81,7 +81,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     pretrained = weights.endswith('.pt')
     if pretrained:
         with torch_distributed_zero_first(rank):
-            attempt_download(weights, tag='v2.0')  # download if not found locally
+            attempt_download(weights, tag='v4.0')  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
         if hyp.get('anchors'):
             ckpt['model'].yaml['anchors'] = round(hyp['anchors'])  # force autoanchor
@@ -369,6 +369,9 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
 
         # DDP process 0 or single-GPU
         if rank in [-1, 0]:
+            training_save = save_dir / "{}".format(epoch)
+            training_save.mkdir(parents=True, exist_ok=True)  # make dir
+
             # mAP
             if ema:
                 ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights'])
@@ -380,7 +383,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                                                  model=ema.ema,
                                                  single_cls=opt.single_cls,
                                                  dataloader=testloader,
-                                                 save_dir=save_dir,
+                                                 save_dir=training_save,
                                                  plots=plots and final_epoch,
                                                  log_imgs=opt.log_imgs if wandb else 0,
                                                  enable_half=False)
@@ -419,7 +422,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                             'wandb_id': wandb_run.id if wandb else None}
 
                 # Save last, best and delete
-                torch.save(ckpt, last)
+                torch.save(ckpt, training_save / "last.pt")
                 if best_fitness == fi:
                     torch.save(ckpt, best)
                 del ckpt
