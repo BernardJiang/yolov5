@@ -254,3 +254,4 @@ fabric.properties
 .bash_history
 .ssh 
 .vscode-server
+.gitconfig
