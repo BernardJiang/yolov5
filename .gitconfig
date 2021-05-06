@@ -2,4 +2,4 @@
 	email = hongyujiang@hotmail.com
 	name = Bernard Jiang
 [credential]
-	helper = "!f() { /usr/src/app/.vscode-server/bin/3c4e3df9e89829dce27b7b5c24508306b151f30d/node /tmp/vscode-remote-containers-d358fed7a48dfcdd4aded4840fee44f3c2cd4d05.js $*; }; f"
+	helper = "!f() { /usr/src/app/.vscode-server/bin/3c4e3df9e89829dce27b7b5c24508306b151f30d/node /tmp/vscode-remote-containers-c81d3fbcf6040bf3eabc4c6f4ca4163ce5d53503.js $*; }; f"
