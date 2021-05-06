@@ -254,7 +254,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     scaler = amp.GradScaler(enabled=cuda)
     logger.info('Image sizes %g train, %g test\n'
                 'Using %g dataloader workers\nLogging results to %s\n'
-                'Starting training for %g epochs...' % (imgsz, imgsz_test, dataloader.num_workers, save_dir, epochs))
+                'Starting training for %g epochs... %g num_epochs' % (imgsz, imgsz_test, dataloader.num_workers, save_dir, epochs, num_epochs))
 
     if scheduler is not None and start_epoch > 0:
         scheduler.step(start_epoch)
