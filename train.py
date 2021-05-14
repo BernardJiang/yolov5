@@ -120,6 +120,8 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
     p = []
     for k, v in model.named_modules():
+        # logger.info('k=%s, v=%f', k, v.radix)
+        print(k)
         if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
             pg2.append(v.bias)  # biases
         
@@ -129,6 +131,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
             pg1.append(v.weight)  # apply decay
         
         if hasattr(v, 'radix'):
+            print("v.radix = ", v.radix)
             p.append(v.radix)
 
     if opt.adam:
