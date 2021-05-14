@@ -23,3 +23,14 @@ python train.py --data coco128.yaml --weights yolov5s.pt --batch-size 2 --epochs
 python train.py --data coco128.yaml --weights yolov5s.pt --batch-size 2 --epochs 3 --hyp data/hyp.scratch.yaml --qat --lr-cycle-mul 5 --min-lr 5e-6 --lr-cycle-limit 2 --decay-rate 0.6 --freeze-sch 5d,15p
 
 python test.py --data coco128.yaml --weights yolov5s.pt --batch-size 2
+
+docker run --ipc=host --gpus all -it --name kqat_bj \
+-v /home/bernard/develop:/workspace/develop \
+-v /mnt/ssd:/workspace/dataset \
+nvcr.io/nvidia/pytorch:21.02-py3
+
+docker run --ipc=host --gpus '"device=4,5,6,7"' -it --name yolov5_bj \
+-v /mnt/ssd/coco:/usr/src/coco \
+-v /home/bernard/develop/yolov5:/usr/src/app \
+-v /home/bernard/develop:/workspace/develop \
+ultralytics/yolov5:latest
