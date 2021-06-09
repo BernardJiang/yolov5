@@ -35,7 +35,7 @@ docker run --ipc=host --gpus '"device=4,5,6,7"' -it --name yolov5_bj \
 -v /home/bernard/develop:/workspace/develop \
 ultralytics/yolov5:latest
 
-docker run --ipc=host --gpus '"device=4,5,6,7"' -it --name kqat_bj4567 \
+docker run --ipc=host --gpus '"device=2,3,4,5,6,7"' -it --name bj_kqat_234567 \
 -v /home/bernard/develop:/workspace/develop \
 -v /mnt/ssd:/workspace/dataset \
 nvcr.io/nvidia/pytorch:21.02-py3
