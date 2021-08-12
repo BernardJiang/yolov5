@@ -29,7 +29,7 @@ docker run --ipc=host --gpus all -it --name kqat_bj \
 -v /mnt/ssd:/workspace/dataset \
 nvcr.io/nvidia/pytorch:21.02-py3
 
-docker run --ipc=host --gpus '"device=4,5,6,7"' -it --name yolov5_bj \
+docker run --ipc=host --gpus '"device=2,3,4,5,6,7"' -it --name bj_yolov5_234567 \
 -v /mnt/ssd/coco:/usr/src/coco \
 -v /home/bernard/develop/yolov5:/usr/src/app \
 -v /home/bernard/develop:/workspace/develop \
@@ -39,3 +39,10 @@ docker run --ipc=host --gpus '"device=2,3,4,5,6,7"' -it --name bj_kqat_234567 \
 -v /home/bernard/develop:/workspace/develop \
 -v /mnt/ssd:/workspace/dataset \
 nvcr.io/nvidia/pytorch:21.02-py3
+
+docker run --ipc=host --gpus '"device=4,5,6,7"' -it --name bj_kqat_4567 \
+-v /home/bernard/develop:/workspace/develop \
+-v /mnt/ssd:/workspace/dataset \
+nvcr.io/nvidia/pytorch:21.02-py3
+
+python  ["/workspace/develop/dataset/", "--model", "mobilenetv2_100", "--dataset", "imagenet_1k", "--pretrained", "-j", "16", "--pin-mem", "--qat", "--pot", "-b", "32", "--bitwidth", "8", "--distill"]
