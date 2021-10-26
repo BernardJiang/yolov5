@@ -6,6 +6,7 @@ import random
 import time
 from pathlib import Path
 from threading import Thread
+# from typing_extensions import Required
 from warnings import warn
 
 import numpy as np
@@ -97,6 +98,19 @@ def extract(hyp, opt, device, tb_writer=None, wandb=None):
         model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
 
     if opt.distill:
+        torch.save(model.state_dict(), "./zeroqyolodata/zeroqyolov5s.pt")
+        x = torch.randn(opt.batch_size, 3, 640, 640)
+        model.to('cpu')
+        torch.onnx.export(model,               # model being run
+                            x,                         # model input (or a tuple for multiple inputs)
+                            "./zeroqyolodata/zeroqyolov5s.onnx",   # where to save the model (can be a file or file-like object)
+                            export_params=True,        # store the trained parameter weights inside the model file
+                            opset_version=11,          # the ONNX version to export the model to
+                            do_constant_folding=False,  # whether to execute constant folding for optimization
+                            input_names = ['in2put'],   # the model's input names
+                            output_names = ['out2put'], # the model's output names
+                            keep_initializers_as_inputs=True,
+        )
         # data_config = resolve_data_config(vars(opt), model=model)
         # data_config = (3, 640, 640) data_config["input_size"]
         dataset = kqat.get_distill_dataset(model, (3, 640, 640), num_batch=4,
