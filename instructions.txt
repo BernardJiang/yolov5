@@ -40,6 +40,16 @@ docker run --ipc=host --gpus '"device=2,3,4,5,6,7"' -it --name bj_kqat_234567 \
 -v /mnt/ssd:/workspace/dataset \
 nvcr.io/nvidia/pytorch:21.02-py3
 
+docker run --ipc=host --gpus '"device=2,3,4,5,6,7"' -it --name bj_adaquant_234567 \
+-v /home/bernard/develop:/workspace/develop \
+-v /mnt/ssd:/workspace/dataset \
+nvcr.io/nvidia/pytorch:21.10-py3
+
+docker run --ipc=host --gpus all -it --name bj_adaquant \
+-v /home/bernard/develop:/workspace/develop \
+-v /mnt/ssd:/workspace/dataset \
+nvcr.io/nvidia/pytorch:21.10-py3
+
 docker run --ipc=host --gpus '"device=4,5,6,7"' -it --name bj_kqat_4567 \
 -v /home/bernard/develop:/workspace/develop \
 -v /mnt/ssd:/workspace/dataset \
