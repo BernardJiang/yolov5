@@ -67,10 +67,4 @@ sudo docker run --rm -it --name bj_toolchain \
 -v /mnt/ssd/coco:/usr/src/coco \
 -v /home/bernard/develop/yolov5:/usr/src/app \
 -v /home/bernard/develop:/workspace/develop \
-kneron/toolchain:v0.14.2 
-
-sudo docker run --rm -it --name bj_toolchainv0.15.2 \
--v /mnt/ssd/coco:/usr/src/coco \
--v /home/bernard/develop/yolov5:/usr/src/app \
--v /home/bernard/develop:/workspace/develop \
-kneron/toolchain:v0.15.2
+kneron/toolchain:v0.15.4
